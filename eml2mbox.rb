@@ -1,41 +1,12 @@
 #!/usr/bin/ruby
 # encoding: utf-8
-#============================================================================================#
-# Converts a bunch of eml files into one mbox file.                                          #
-#                                                                                            #
-# Usage: [ruby] eml2mbx.rb [-a] [-c] [-h] [-l] [-m] [-s] [-yz] [emlpath [trgtmbx]]           #
-#         Switches:                                                                          #
-#            -a assume all files are emails - ignore extensions                              #
-#            -c Remove CRs (^M) appearing at end of lines (Unix)                             #
-#            -f Act on a single .eml file, rather than an .eml dir                           #
-#            -l Remove LFs appearing at beggining of lines (old Mac) - not tested            #
-#            -h Show help and exit                                                           #
-#            -m Handle multiline From: headers (RFC822 phrase + routed_addr)                 #
-#            -s Don't use standard mbox postmark formatting (for From_ line)                 #
-#               This will force the use of original From and Date found in mail headers.     #
-#               Not recommended, unless you really have problems importing emls.             #
-#           -yz Use this to force the order of the year and timezone in date in the From_    #
-#               line from the default [timezone][year] to [year][timezone].                  #
-#         emlpath - Path of dir with eml files. Defaults to the current dir if not specified #
-#         trgtmbx - Name of the target mbox file. Defaults to "archive.mbox" in 'emlpath'    #
-#                                                                                            #
-#============================================================================================#
-# Licence:                                                                                   #
-#                                                                                            #
-# This script is free software; you can redistribute it and/or modify it under the terms of  #
-# the GNU Lesser General Public License as published by the Free Software Foundation;        # 
-# either version 2.1 of the License, or (at your option) any later version.                  #
-#                                                                                            #
-# You should have received a copy of the GNU Lesser General Public License along with this   #
-# script; if not, please visit http://www.gnu.org/copyleft/gpl.html for more information.    #
-#============================================================================================#
 
 require "date"
+require 'fileutils'
 
 #=======================================================#
 # Class that encapsulates the processing file in memory #
 #=======================================================#
-
 class FileInMemory
     
     ZoneOffset = {
@@ -73,33 +44,25 @@ class FileInMemory
             if line =~ /.*@/
                 @from = line.sub(/From:/,'From')
                 @from = @from.chop    # Remove line break(s)
-                @from = standardizeFrom(@from) unless $switches["noStandardFromLine"]
-            elsif $switches["multilineFrom"]
-                @prefrom = line.chop
+                @from = standardizeFrom(@from)
             end
         end
 
-        # Get the date
-        if $switches["noStandardFromLine"]
-            # Don't parse the content of the Date header
-            @date = line.sub(/Date:\s/,'') if line =~ /^Date:\s/ and @date==nil
-        else
-            if line =~ /^Date:\s/ and @date==nil
-                # Parse content of the Date header and convert to the mbox standard for the From_ line
-                @date = line.sub(/Date:\s/,'')
-                year, month, day, hour, minute, second, timezone, wday = DateTime._parse(@date, false).values_at(:year, :mon, :mday, :hour, :min, :sec, :zone, :wday)
-                # Need to convert the timezone from a string to a 4 digit offset
-                unless timezone =~ /[+|-]\d*/
-                    timezone=ZoneOffset[timezone]
-                end
-                begin
-                   time = Time.gm(year,month,day,hour,minute,second)
-                   @date = formMboxDate(time,timezone)
-                rescue
-                   @date = nil
-                   $errors = true
-                   print "[skipping bad date]"
-                end
+        if line =~ /^Date:\s/ and @date==nil
+            # Parse content of the Date header and convert to the mbox standard for the From_ line
+            @date = line.sub(/Date:\s/,'')
+            year, month, day, hour, minute, second, timezone, wday = DateTime._parse(@date, false).values_at(:year, :mon, :mday, :hour, :min, :sec, :zone, :wday)
+            # Need to convert the timezone from a string to a 4 digit offset
+            unless timezone =~ /[+|-]\d*/
+                timezone=ZoneOffset[timezone]
+            end
+            begin
+                time = Time.gm(year,month,day,hour,minute,second)
+                @date = formMboxDate(time,timezone)
+            rescue
+                @date = nil
+                $errors = true
+                print "[skipping bad date]"
             end
         end
 
@@ -130,26 +93,8 @@ class FileInMemory
 
     # Fixes CR/LFs
     def fixLineEndings(line)
-        line = removeCR(line) if $switches["removeCRs"];
-        line = removeLF(line) if $switches["removeLFs"];
         return line
     end
-
-    # emls usually have CR+LF (DOS) line endings, Unix uses LF as a line break,
-    # so there's a hanging CR at the end of the line when viewed on Unix.
-    # This method will remove the next to the last character from a line
-    def removeCR(line)
-        line = line[0..-3]+line[-1..-1] if line[-2]==0xD
-        return line
-    end
-
-    # Similar to the above. This one is for Macs that use CR as a line break.
-    # So, remove the last char
-    def removeLF(line)
-        line = line[0..-2] if line[-1]==0xA
-        return line
-    end
-
 end
 
 #================#
@@ -176,178 +121,109 @@ def formMboxDate(time,timezone)
     if timezone==nil
         return time.strftime("%a %b %d %H:%M:%S %Y")
     else
-        if $switches["zoneYearOrder"]
-            return time.strftime("%a %b %d %H:%M:%S "+timezone.to_s+" %Y")
-        else 
-            return time.strftime("%a %b %d %H:%M:%S %Y "+timezone.to_s)
-        end
+        return time.strftime("%a %b %d %H:%M:%S %Y "+timezone.to_s)
     end
 end
 
-# Extracts all switches from the command line and returns
-# a hashmap with valid switch names as keys and booleans as values
-# Moves real params to the beggining of the ARGV array
-def extractSwitches()
-    switches = Hash.new(false)  # All switches (values) default to false
-    i=0
-    while (ARGV[i]=~ /^-/)  # while arguments are switches
-        if ARGV[i]=="-a"
-            switches["ignoreExt"] = true
-            puts "\nWill ignore file extension, assume all files are emails"
-        elsif ARGV[i]=="-c"
-            switches["removeCRs"] = true
-            puts "\nWill fix lines ending with a CR"
-        elsif ARGV[i]=="-f"
-            switches["singleFile"] = true
-            puts "\nWill act on a single .eml file, rather than an .eml dir"
-        elsif ARGV[i]=="-h"
-            switches["showHelp"] = true
-            puts "\nWill show help and exit"
-        elsif ARGV[i]=="-l"
-            switches["removeLFs"] = true
-            puts "\nWill fix lines beggining with a LF"
-        elsif ARGV[i]=="-m"
-            switches["multilineFrom"] = true
-            puts "\nWill handle Outlook phrase + route_addr multiline From_ headers"
-        elsif ARGV[i]=="-s"
-            switches["noStandardFromLine"] = true
-            puts "\nWill use From and Date from mail headers in From_ line"
-        elsif ARGV[i]=="-yz"
-            switches["zoneYearOrder"] = true
-            puts "\nTimezone will be placed before the year in From_ line"
-        else
-            puts "\nUnknown switch: "+ARGV[i]+". Ignoring."
-        end
-        i = i+1
+# 检查并创建多级目录
+def checkDir(path)
+    if not File.directory?(path)
+        FileUtils.mkdir_p(path)
     end
-    # Move real arguments to the beggining of the array
-    ARGV[0] = ARGV[i]
-    ARGV[1] = ARGV[i+1]
-    return switches
 end
 
-# Shows usage instructions
-def showHelp()
-    puts "# Usage: [ruby] eml2mbx.rb [-a] [-c] [-h] [-l] [-m] [-s] [-yz] [emlpath [trgtmbx]]           #
-#         Switches:                                                                          #
-#            -a assume all files are emails - ignore extensions                              #
-#            -c Remove CRs (^M) appearing at end of lines (Unix)                             #
-#            -l Remove LFs appearing at beggining of lines (old Mac) - not tested            #
-#            -h Show help and exit                                                           #
-#            -m Handle multiline From: headers (RFC822 phrase + routed_addr)                 #
-#            -s Don't use standard mbox postmark formatting (for From_ line)                 #
-#               This will force the use of original From and Date found in mail headers.     #
-#               Not recommended, unless you really have problems importing emls.             #
-#           -yz Use this to force the order of the year and timezone in date in the From_    #
-#               line from the default [timezone][year] to [year][timezone].                  #
-#         emlpath - Path of dir with eml files. Defaults to the current dir if not specified #
-#         trgtmbx - Name of the target mbox file. Defaults to 'archive.mbox' in 'emlpath'    #
-#                                                                                            #
-#============================================================================================#"
-end
+
 
 #===============#
 #     Main      #
 #===============#
 
-$switches = extractSwitches()
-if $switches["showHelp"]
-    showHelp()
-    abort("")
-end
 $stdout.sync = true
 
-# Extract specified directory with emls and the target archive (if any)
-emlDir = "."     # default if not specified
-if ARGV[0]!=nil
-  if $switches["singleFile"]
-    emlDir = File.dirname(ARGV[0])
-    emlFile = File.basename(ARGV[0])
-  else
+system 'title EML To Mbox'
+system 'cls'
+
+workPath = File.dirname(__FILE__).gsub('/', '\\') + '\\'
+savePath = workPath + 'mbox\\'
+
+if ARGV[0] != nil
     emlDir = ARGV[0]
-  end
-end
-mboxArchive = emlDir + "archive.mbox"    # default if not specified
-mboxArchive = ARGV[1] if ARGV[1] != nil
-
-# Show specified settings
-puts "\nSpecified dir : "+emlDir
-puts "Specified file: "+mboxArchive+"\n"
-
-# Check if destination file exists. If yes allow user to select an option.
-canceled = false
-if FileTest.exist?(mboxArchive)
-    print "\nFile ["+mboxArchive+"] exists! Please select: [A]ppend  [O]verwrite  [C]ancel (default) "
-    sel = STDIN.gets.chomp
-    if sel == 'A' or sel == 'a'
-        aFile = File.new(mboxArchive, "a");
-    elsif sel == 'O' or sel == 'o'
-        aFile = File.new(mboxArchive, "w");
-    else
-        canceled = true
+    if emlDir.rindex(':/') == nil and emlDir.rindex(':\\') == nil
+        emlDir = workPath + emlDir
     end
 else
-    # File doesn't exist, open for writing
-    aFile = File.new(mboxArchive, "w");
+    emlDir = workPath
 end
 
-# Check that the dir exists
-if FileTest.directory?(emlDir)
+if File.directory?(emlDir)
     Dir.chdir(emlDir)
+    puts "\n扫描路径：[" + emlDir + "]\n\n\n\n"
 else
-    puts "\n["+emlDir+"] is not a directory (might not exist). Please specify a valid dir"
+    puts "\n[#{emlDir}] 不是一个目录，或目录不存在，请指定有效的目录！\n\n\n"
     exit(0)
 end
 
-if not canceled
-    puts
-    if $switches["singleFile"]
-      files = [emlFile]
-      if not FileTest.exist?(emlFile)
-         puts "That eml file does not exist. mbox file not created."
-         aFile.close
-         File.delete(mboxArchive)
-         exit(0)
-      end
+Dir.glob('**/').each do |searchPath|
+    emlFiles = Dir.glob("#{searchPath}*.{eml,mai}", File::FNM_CASEFOLD)
+    if emlFiles.size == 0
+        puts "[#{searchPath.gsub('/', '\\').chop()}] 目录没有 EML 文件"
+        next
+    end
+
+    mboxPath = savePath + "#{searchPath.gsub('/', '\\').chop()}.mbox"
+    puts "========== [#{searchPath.gsub('/', '\\').chop()}]（#{emlFiles.size}）==========\n\n"
+    puts "输出路径：" + mboxPath + "\n\n"
+
+    if File.exist?(mboxPath)
+        print "文件已存在！请选择：[A]追加  [O]覆盖  [C]跳过（默认）："
+        sel = STDIN.gets.chomp
+        if sel == 'A' or sel == 'a'
+            fileHandle = File.new(mboxPath, "a");
+            puts
+        elsif sel == 'O' or sel == 'o'
+            fileHandle = File.new(mboxPath, "w");
+            puts
+        else
+            puts "\n\n\n"
+            next
+        end
     else
-      if $switches["ignoreExt"]
-        globtext = "*"
-      else
-        globtext = "*.{eml,mai}"
-      end
-      files = Dir.glob(globtext, File::FNM_CASEFOLD)
-      if files.size == 0
-        puts "No *.eml files in this directory. mbox file not created."
-        aFile.close
-        File.delete(mboxArchive)
-        exit(0)
-      end
-    end
-    # For each .eml file in the specified directory do the following
-    puts "About to process #{files.size} mail files"
-    filenum = 0
-    errors = 0
-    files.each() do |x|
-        $errors = false
-        filenum += 1
-        filenumtxt = filenum.to_s.rjust("#{files.size}".length)
-        print "#{filenumtxt}/#{files.size}: "+x+"  "
-        thisFile = FileInMemory.new()
-        File.open(x).each  {|item| thisFile.addLine(item) }
-        lines = thisFile.getProcessedLines
-        if lines == nil
-            $errors = true
-            print "[skipping mail without regular From: line]"
-        else
-            lines.each {|line| aFile.puts line}
+        tempPath = searchPath.gsub('/', '\\').chop()
+        tempIndex = tempPath.rindex('\\')
+        tempIndex = tempIndex != nil ? tempIndex : 0
+        checkDir(savePath + tempPath[0, tempIndex])
+        fileHandle = File.new(mboxPath, "w");
+    end    
+
+    fileNum = 0
+    errorNum = 0
+    emlFiles.each() do |i|
+        isError = false
+        fileNum += 1
+        fileNumStr = fileNum.to_s.rjust("#{emlFiles.size}".length)
+        print "#{fileNumStr}/#{emlFiles.size}：" + i + "  "
+        memoryFile = FileInMemory.new()
+        File.open(i).each {|item| memoryFile.addLine(item)}
+
+        if not ARGV[1]
+            lines = memoryFile.getProcessedLines
+            if lines == nil
+                isError = true
+                print '[跳过没有常规发件人的邮件]'.ljust(120)
+            else
+                lines.each {|line| fileHandle.puts line}
+            end
         end
-        if $errors
-          print "\n"
-          errors += 1
+
+        if isError
+            print "\n"
+            errorNum += 1
         else
-          print "\r"
+            print "\r"
         end
     end
-    aFile.close
-    puts "There were #{errors} files with errors.                                        "
+    fileHandle.close
+
+    puts "处理完毕，有 #{errorNum} 个文件出错".ljust(120)
+    puts "\n\n\n"
 end
