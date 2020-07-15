@@ -132,6 +132,73 @@ def checkDir(path)
     end
 end
 
+# 核心处理函数
+def handle(searchPath)
+    emlFiles = Dir.glob("#{searchPath}*.{eml,mai}", File::FNM_CASEFOLD)
+    if emlFiles.size == 0
+        msg = "[#{searchPath.gsub('/', '\\').chop()}]"
+        print msg, "目录没有 EML 文件".rjust(110 - msg.length), "\n"
+        return
+    end
+
+    mboxPath = savePath + "#{searchPath.gsub('/', '\\').chop()}.mbox"
+    puts "========== [#{searchPath.gsub('/', '\\').chop()}]（#{emlFiles.size}）==========\n\n"
+    puts "输出路径：" + mboxPath + "\n\n"
+
+    if File.exist?(mboxPath)
+        print "文件已存在！请选择：[A]追加  [O]覆盖  [C]跳过（默认）："
+        sel = STDIN.gets.chomp
+        if sel == 'A' or sel == 'a'
+            fileHandle = File.new(mboxPath, "a");
+            puts
+        elsif sel == 'O' or sel == 'o'
+            fileHandle = File.new(mboxPath, "w");
+            puts
+        else
+            puts "\n\n\n"
+            return
+        end
+    else
+        tempPath = searchPath.gsub('/', '\\').chop()
+        tempIndex = tempPath.rindex('\\')
+        tempIndex = tempIndex != nil ? tempIndex : 0
+        checkDir(savePath + tempPath[0, tempIndex])
+        fileHandle = File.new(mboxPath, "w");
+    end    
+
+    fileNum = 0
+    errorNum = 0
+    emlFiles.each() do |i|
+        isError = false
+        fileNum += 1
+        fileNumStr = fileNum.to_s.rjust("#{emlFiles.size}".length)
+        msg = "#{fileNumStr}/#{emlFiles.size}：#{i}"
+        print msg
+        memoryFile = FileInMemory.new()
+        File.open(i).each {|item| memoryFile.addLine(item)}
+
+        if not ARGV[1]
+            lines = memoryFile.getProcessedLines
+            if lines == nil
+                isError = true
+                print '[跳过没有常规发件人的邮件]'.ljust(105 - msg.length)
+            else
+                lines.each {|line| fileHandle.puts line}
+            end
+        end
+
+        if isError
+            print "\n"
+            errorNum += 1
+        else
+            print "\r"
+        end
+    end
+    fileHandle.close
+
+    puts "处理完毕，有 #{errorNum} 个文件出错".ljust(120)
+    puts "\n\n\n"
+end
 
 
 #===============#
@@ -157,73 +224,14 @@ end
 
 if File.directory?(emlDir)
     Dir.chdir(emlDir)
-    puts "\n扫描路径：[" + emlDir + "]\n\n\n\n"
+    #puts "\n扫描路径：[" + emlDir + "]\n\n"
+    puts
 else
     puts "\n[#{emlDir}] 不是一个目录，或目录不存在，请指定有效的目录！\n\n\n"
     exit(0)
 end
 
+handle(emlDir)
 Dir.glob('**/').each do |searchPath|
-    emlFiles = Dir.glob("#{searchPath}*.{eml,mai}", File::FNM_CASEFOLD)
-    if emlFiles.size == 0
-        puts "[#{searchPath.gsub('/', '\\').chop()}] 目录没有 EML 文件"
-        next
-    end
-
-    mboxPath = savePath + "#{searchPath.gsub('/', '\\').chop()}.mbox"
-    puts "========== [#{searchPath.gsub('/', '\\').chop()}]（#{emlFiles.size}）==========\n\n"
-    puts "输出路径：" + mboxPath + "\n\n"
-
-    if File.exist?(mboxPath)
-        print "文件已存在！请选择：[A]追加  [O]覆盖  [C]跳过（默认）："
-        sel = STDIN.gets.chomp
-        if sel == 'A' or sel == 'a'
-            fileHandle = File.new(mboxPath, "a");
-            puts
-        elsif sel == 'O' or sel == 'o'
-            fileHandle = File.new(mboxPath, "w");
-            puts
-        else
-            puts "\n\n\n"
-            next
-        end
-    else
-        tempPath = searchPath.gsub('/', '\\').chop()
-        tempIndex = tempPath.rindex('\\')
-        tempIndex = tempIndex != nil ? tempIndex : 0
-        checkDir(savePath + tempPath[0, tempIndex])
-        fileHandle = File.new(mboxPath, "w");
-    end    
-
-    fileNum = 0
-    errorNum = 0
-    emlFiles.each() do |i|
-        isError = false
-        fileNum += 1
-        fileNumStr = fileNum.to_s.rjust("#{emlFiles.size}".length)
-        print "#{fileNumStr}/#{emlFiles.size}：" + i + "  "
-        memoryFile = FileInMemory.new()
-        File.open(i).each {|item| memoryFile.addLine(item)}
-
-        if not ARGV[1]
-            lines = memoryFile.getProcessedLines
-            if lines == nil
-                isError = true
-                print '[跳过没有常规发件人的邮件]'.ljust(120)
-            else
-                lines.each {|line| fileHandle.puts line}
-            end
-        end
-
-        if isError
-            print "\n"
-            errorNum += 1
-        else
-            print "\r"
-        end
-    end
-    fileHandle.close
-
-    puts "处理完毕，有 #{errorNum} 个文件出错".ljust(120)
-    puts "\n\n\n"
+    handle(searchPath)
 end
