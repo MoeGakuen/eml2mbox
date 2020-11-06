@@ -1,5 +1,5 @@
 #!/usr/bin/ruby
-# encoding: utf-8
+# encoding: UTF-8
 
 require "date"
 require 'fileutils'
@@ -134,16 +134,17 @@ end
 
 # 核心处理函数
 def handle(searchPath)
-    emlFiles = Dir.glob("#{searchPath}*.{eml,mai}", File::FNM_CASEFOLD)
+    Dir.chdir(searchPath)
+    emlFiles = Dir.glob(['*.eml', '*.mai'], File::FNM_CASEFOLD)
     if emlFiles.size == 0
-        msg = "[#{searchPath.gsub('/', '\\').chop()}]"
+        msg = "[#{searchPath}]"
         print msg, "目录没有 EML 文件".rjust(110 - msg.length), "\n"
         return
     end
 
-    mboxPath = savePath + "#{searchPath.gsub('/', '\\').chop()}.mbox"
-    puts "========== [#{searchPath.gsub('/', '\\').chop()}]（#{emlFiles.size}）==========\n\n"
-    puts "输出路径：" + mboxPath + "\n\n"
+    mboxPath = @savePath + File.basename(searchPath) + ".mbox"
+    puts "[#{searchPath}]（#{emlFiles.size}）\n\n"
+    puts "输出路径：#{mboxPath}\n\n"
 
     if File.exist?(mboxPath)
         print "文件已存在！请选择：[A]追加  [O]覆盖  [C]跳过（默认）："
@@ -159,10 +160,7 @@ def handle(searchPath)
             return
         end
     else
-        tempPath = searchPath.gsub('/', '\\').chop()
-        tempIndex = tempPath.rindex('\\')
-        tempIndex = tempIndex != nil ? tempIndex : 0
-        checkDir(savePath + tempPath[0, tempIndex])
+        checkDir(@savePath)
         fileHandle = File.new(mboxPath, "w");
     end    
 
@@ -172,7 +170,7 @@ def handle(searchPath)
         isError = false
         fileNum += 1
         fileNumStr = fileNum.to_s.rjust("#{emlFiles.size}".length)
-        msg = "#{fileNumStr}/#{emlFiles.size}：#{i}"
+        msg = "#{fileNumStr}/#{emlFiles.size}：#{i[0,30]}"
         print msg
         memoryFile = FileInMemory.new()
         File.open(i).each {|item| memoryFile.addLine(item)}
@@ -210,8 +208,9 @@ $stdout.sync = true
 system 'title EML To Mbox'
 system 'cls'
 
-workPath = File.dirname(__FILE__).gsub('/', '\\') + '\\'
-savePath = workPath + 'mbox\\'
+workPath = File.dirname(__FILE__).gsub('/', '\\')
+if workPath[-1,1] != "\\" then workPath += '\\' end
+@savePath = workPath + 'mbox\\'
 
 if ARGV[0] != nil
     emlDir = ARGV[0]
@@ -233,5 +232,5 @@ end
 
 handle(emlDir)
 Dir.glob('**/').each do |searchPath|
-    handle(searchPath)
+    handle(emlDir + searchPath.gsub('/', '\\'))
 end
