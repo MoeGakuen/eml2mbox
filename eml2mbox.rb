@@ -1,8 +1,9 @@
 #!/usr/bin/ruby
-# encoding: UTF-8
+#encoding: UTF-8
 
 require "date"
 require 'fileutils'
+require 'pathname'
 
 #=======================================================#
 # Class that encapsulates the processing file in memory #
@@ -137,13 +138,15 @@ def handle(searchPath)
     Dir.chdir(searchPath)
     emlFiles = Dir.glob(['*.eml', '*.mai'], File::FNM_CASEFOLD)
     if emlFiles.size == 0
-        msg = "[#{searchPath}]"
-        print msg, "目录没有 EML 文件".rjust(110 - msg.length), "\n"
+        print "跳过路径：#{searchPath}", "\n\n\n"
+        
         return
+    else
+        msg = "扫描路径：#{searchPath}"
     end
 
     mboxPath = @savePath + File.basename(searchPath) + ".mbox"
-    puts "[#{searchPath}]（#{emlFiles.size}）\n\n"
+    print msg, "#{emlFiles.size} 封邮件".rjust(100 - msg.length), "\n"
     puts "输出路径：#{mboxPath}\n\n"
 
     if File.exist?(mboxPath)
@@ -162,7 +165,7 @@ def handle(searchPath)
     else
         checkDir(@savePath)
         fileHandle = File.new(mboxPath, "w");
-    end    
+    end  
 
     fileNum = 0
     errorNum = 0
@@ -170,8 +173,8 @@ def handle(searchPath)
         isError = false
         fileNum += 1
         fileNumStr = fileNum.to_s.rjust("#{emlFiles.size}".length)
-        msg = "#{fileNumStr}/#{emlFiles.size}：#{i[0,30]}"
-        print msg
+        msg = "#{fileNumStr}/#{emlFiles.size}：#{i[0,50]}"
+        print msg.ljust(90)
         memoryFile = FileInMemory.new()
         File.open(i).each {|item| memoryFile.addLine(item)}
 
@@ -179,23 +182,24 @@ def handle(searchPath)
             lines = memoryFile.getProcessedLines
             if lines == nil
                 isError = true
-                print '[跳过没有常规发件人的邮件]'.ljust(105 - msg.length)
             else
                 lines.each {|line| fileHandle.puts line}
             end
         end
 
         if isError
-            print "\n"
             errorNum += 1
+            checkDir(@errorPath)
+            FileUtils.copy(i, @errorPath)
+            print "\n"
         else
             print "\r"
         end
     end
     fileHandle.close
 
-    puts "处理完毕，有 #{errorNum} 个文件出错".ljust(120)
-    puts "\n\n\n"
+    if errorNum > 0 then puts "\n\n" end
+    puts "处理完毕，有 #{errorNum} 个文件出错".ljust(120), "------------------------------------------------------------\n\n"
 end
 
 
@@ -208,23 +212,24 @@ $stdout.sync = true
 system 'title EML To Mbox'
 system 'cls'
 
-workPath = File.dirname(__FILE__).gsub('/', '\\')
-if workPath[-1,1] != "\\" then workPath += '\\' end
-@savePath = workPath + 'mbox\\'
+@workPath = Pathname.new(File.dirname(__FILE__)).realpath
+@workPath = "#{@workPath}".gsub('/', '\\')
+
+if @workPath[-1,1] != "\\" then @workPath += '\\' end
+@savePath = @workPath + 'mbox\\'
+@errorPath = @workPath + 'error\\'
 
 if ARGV[0] != nil
     emlDir = ARGV[0]
     if emlDir.rindex(':/') == nil and emlDir.rindex(':\\') == nil
-        emlDir = workPath + emlDir
+        emlDir = @workPath + emlDir
     end
 else
-    emlDir = workPath
+    emlDir = @workPath
 end
 
 if File.directory?(emlDir)
     Dir.chdir(emlDir)
-    #puts "\n扫描路径：[" + emlDir + "]\n\n"
-    puts
 else
     puts "\n[#{emlDir}] 不是一个目录，或目录不存在，请指定有效的目录！\n\n\n"
     exit(0)
